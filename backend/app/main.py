@@ -13,10 +13,10 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Route, WebSocketRoute, Mount
+from starlette.staticfiles import StaticFiles
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
-from starlette.datastructures import UploadFile
 
 # ──────────────────────────────────────────────
 # SQLite — no extra driver needed
@@ -108,7 +108,6 @@ def _make_demo_video(path: str):
 # Video processing thread
 # ──────────────────────────────────────────────
 def _processing_loop():
-    # Import AI engine
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if root not in sys.path:
         sys.path.insert(0, root)
@@ -151,7 +150,6 @@ def _processing_loop():
                     "alerts":      telemetry.get("alerts", []),
                 }
             else:
-                # Visual-only: draw a simple overlay without YOLO
                 processed = frame.copy()
                 cv2.line(processed, (215, 480), (275, 0), (0, 255, 255), 3)
                 cv2.putText(processed, "RAILGUARD AI - DEMO MODE",
@@ -170,7 +168,6 @@ def _processing_loop():
     cap.release()
     print("[INFO] Processing stopped.")
 
-
 # ──────────────────────────────────────────────
 # REST handlers
 # ──────────────────────────────────────────────
@@ -179,6 +176,13 @@ async def health(request: Request):
 
 async def get_status(request: Request):
     return JSONResponse({"is_monitoring": state["is_monitoring"]})
+
+async def get_frame(request: Request):
+    return JSONResponse({
+        "is_monitoring": state["is_monitoring"],
+        "telemetry": state["telemetry"],
+        "frame": state["frame_b64"]
+    })
 
 async def start_monitor(request: Request):
     if state["is_monitoring"]:
@@ -247,17 +251,26 @@ async def ws_monitor(websocket: WebSocket):
             ws_clients.remove(websocket)
 
 # ──────────────────────────────────────────────
-# App
+# App routes
+# CRITICAL: API and WebSocket routes FIRST, Mount LAST!
 # ──────────────────────────────────────────────
+frontend_dist = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "frontend",
+    "dist"
+)
+
 routes = [
     Route("/api/health",          health),
     Route("/api/status",          get_status),
+    Route("/api/monitor/frame",   get_frame),
     Route("/api/monitor/start",   start_monitor, methods=["POST"]),
     Route("/api/monitor/stop",    stop_monitor,  methods=["POST"]),
     Route("/api/video/upload",    upload_video,  methods=["POST"]),
     Route("/api/incidents",       get_incidents),
     Route("/api/analytics",       get_analytics),
     WebSocketRoute("/ws/monitor", ws_monitor),
+    Mount("/", app=StaticFiles(directory=frontend_dist, html=True), name="frontend"),
 ]
 
 middleware = [
